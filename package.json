@@ -1,0 +1,19 @@
+{
+  "name": "meridian",
+  "version": "2.0.0",
+  "description": "Meridian: a 24-hour dial planner",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/theresilientsoul1-debug/meridian-.git"
+  },
+  "bugs": {
+    "url": "https://github.com/theresilientsoul1-debug/meridian-/issues"
+  },
+  "homepage": "https://github.com/theresilientsoul1-debug/meridian-#readme",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.118.0",
+    "web-push": "^3.6.7"
+  },
+  "private": true,
+  "type": "module"
+}

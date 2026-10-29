@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Meridian</title>
+<meta name="description" content="Your day on a 24-hour dial.">
+<meta name="theme-color" content="#0f0e0d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Meridian">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="top" id="top">
+  <div class="top-in">
+    <div class="brand">
+      <svg viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="11.25" fill="none" stroke="#efe9dd" stroke-width="1.5"/><path d="M13 13 L13 2.5" stroke="#efe9dd" stroke-width="1.5"/><path d="M13 1.75 A11.25 11.25 0 0 1 24.25 13" fill="none" stroke="#c9a66b" stroke-width="3.5"/><circle cx="13" cy="13" r="1.8" fill="#efe9dd"/></svg>
+      <span>Meridian</span>
+    </div>
+    <nav class="top-links" aria-label="Views">
+      <button type="button" id="nav-day" aria-pressed="true">Day</button>
+      <button type="button" id="nav-month" aria-pressed="false">Month</button>
+    </nav>
+    <div class="top-right">
+      <span class="sync" id="sync" aria-live="polite"></span>
+      <button type="button" class="icon-btn" id="nav-month-sm" aria-label="Month view" hidden><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="14" height="13" rx="2"/><path d="M3 8h14M7 2.5v3M13 2.5v3"/></svg></button>
+      <button type="button" class="btn-primary" id="shutdown-btn"><span class="lg-only">Close the day</span><span class="sm-only">Close day</span></button>
+      <button type="button" class="icon-btn" id="open-settings" aria-label="Settings"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="2.6"/><path d="M10 1.8v2.4M10 15.8v2.4M18.2 10h-2.4M4.2 10H1.8M15.8 4.2l-1.7 1.7M5.9 14.1l-1.7 1.7M15.8 15.8l-1.7-1.7M5.9 5.9 4.2 4.2"/></svg></button>
+    </div>
+  </div>
+</header>
+
+<main class="app" id="app">
+  <section class="card auth" id="auth" hidden aria-labelledby="auth-h"></section>
+  <div class="banner" id="banner" hidden></div>
+  <section class="card week" id="week" aria-label="This week"></section>
+  <div class="cols" id="day-view">
+    <div class="col col-l">
+      <section class="card dialcard" aria-labelledby="day-title">
+        <div class="dial-head">
+          <h1 id="day-title">Today</h1>
+          <span class="rel" id="day-rel"></span>
+          <div class="nav">
+            <button type="button" class="btn-text" id="go-today" hidden>Today</button>
+            <button type="button" class="icon-btn" id="prev-day" aria-label="Previous day"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12.5 4.5 7 10l5.5 5.5"/></svg></button>
+            <button type="button" class="icon-btn" id="next-day" aria-label="Next day"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M7.5 4.5 13 10l-5.5 5.5"/></svg></button>
+          </div>
+        </div>
+        <div class="dial-wrap" id="dial-wrap">
+          <svg id="dial" viewBox="-12 -12 624 624" role="img" aria-label="24-hour dial"></svg>
+          <div class="dial-center" id="dial-center" aria-live="polite"></div>
+        </div>
+        <div class="dial-legend" aria-hidden="true">
+          <span><i class="lg-plan"></i>Outer ring: plan</span>
+          <span><i class="lg-act"></i>Inner ring: confirmed</span>
+          <span><i class="lg-carry"></i>Assumed from plan</span>
+        </div>
+      </section>
+      <section class="card inbox" id="inbox-card" aria-labelledby="inbox-h"></section>
+      <section class="card review" id="review-card" aria-labelledby="review-h"></section>
+    </div>
+    <div class="col col-r">
+      <section class="card now" id="now-card" aria-labelledby="now-h"></section>
+      <section class="card agenda" id="agenda-card" aria-labelledby="agenda-h"></section>
+    </div>
+  </div>
+  <div class="month-cols" id="month-view" hidden>
+    <section class="card" id="month-card" aria-labelledby="month-title"></section>
+    <section class="card review" id="review-card-m" aria-labelledby="review-h-m"></section>
+  </div>
+</main>
+<div id="sheet-root"></div>
+<div id="toast-root"></div>
+<div id="drag-ghost" class="drag-ghost" hidden></div>
+<script src="/vendor/supabase.js"></script>
+<script type="module" src="/app.js"></script>
+</body>
+</html>
