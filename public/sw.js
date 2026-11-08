@@ -1,5 +1,5 @@
 // Meridian service worker: keeps the app usable offline and shows notifications.
-const VERSION = 'meridian-v2.0.0';
+const VERSION = 'meridian-v2.1.0';
 const SHELL = ['/', '/index.html', '/app.css', '/app.js', '/core.js', '/vendor/supabase.js', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/apple-touch-icon.png'];
 
 self.addEventListener('install', e => {

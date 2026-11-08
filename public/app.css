@@ -99,7 +99,26 @@ main.app { max-width: 1160px; margin: 0 auto; padding-block: 10px 56px; display:
 .dial-head .nav { margin-left: auto; display: flex; gap: 4px; align-items: center; }
 .market-note { width: 100%; color: var(--faint); font-size: var(--fs-small); }
 .dial-wrap { position: relative; width: 100%; max-width: 600px; margin: 10px auto 0; aspect-ratio: 1; }
-.dial-wrap svg { width: 100%; height: 100%; display: block; touch-action: none; user-select: none; -webkit-user-select: none; }
+.dial-wrap svg { width: 100%; height: 100%; display: block; touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.dial-wrap svg * { pointer-events: none; }
+.dial-hint { display: none; margin: 10px 0 0; text-align: center; color: var(--faint); font-size: var(--fs-small); }
+@media (pointer: coarse) { .dial-hint { display: block; } }
+.selbar { margin-top: 12px; background: var(--raised); border-radius: 16px; padding: 14px; display: grid; gap: 12px; animation: rise .18s cubic-bezier(.2,.8,.2,1); }
+.selbar + .dial-hint { display: none; }
+.sb-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.sb-title { flex: 1; min-width: 0; display: grid; }
+.sb-title b { font-weight: 600; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-title span { color: var(--muted); font-size: 13px; }
+.sb-ctls { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.sb-ctl { display: grid; gap: 6px; min-width: 0; }
+.stepper { display: flex; align-items: center; justify-content: space-between; gap: 6px; background: var(--face); border-radius: 999px; padding: 3px; min-height: 50px; }
+.stepper span { flex: 1; text-align: center; font-weight: 500; white-space: nowrap; font-size: 14px; }
+.stepper.fixed span { color: var(--muted); font-weight: 400; }
+.stepper button { width: 44px; height: 44px; flex: none; border: 0; border-radius: 50%; background: var(--surface); color: var(--text); font-size: 22px; line-height: 1; display: grid; place-items: center; touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.stepper button:hover { background: #2c2a26; }
+.stepper button:active { background: var(--ivory); color: var(--on-ivory); transform: scale(0.94); }
+.selbar .note { margin: 0; }
+.selbar .btn-text[disabled] { opacity: .35; cursor: default; }
 .dial-wrap.drop-hover svg { outline: 2px dashed var(--ivory); outline-offset: -8px; border-radius: 50%; }
 .dial-center { position: absolute; left: 50%; top: 50%; width: 44%; transform: translate(-50%, -50%); text-align: center; pointer-events: none; display: grid; gap: 4px; justify-items: center; }
 .dc-time { font-size: clamp(30px, 7.4vw, 46px); font-weight: 400; letter-spacing: -0.03em; line-height: 1; font-variant-numeric: tabular-nums; }

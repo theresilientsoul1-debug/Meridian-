@@ -4,6 +4,7 @@ const { MIN, addDays, fmtT, fmtR, fmtD, pad } = C;
 /* ===================================================================
    Meridian v2 — the app. Pure time logic lives in core.js (shared with the notification server).
    =================================================================== */
+const mqPhone = window.matchMedia('(max-width: 680px)');
 const TZ = (Intl.DateTimeFormat().resolvedOptions().timeZone) || 'UTC';
 const CX = 300, R_PLAN = 222, W_PLAN = 40, R_ACT = 181, W_ACT = 18, R_TICK = 264, R_LABEL = 289;
 const PALETTE = ['#c9a66b','#b98d85','#a7a57c','#8fb093','#6fa8a6','#8299b8','#c7b48f','#a98f7a','#9aa3a8','#55524d'];
@@ -11,7 +12,7 @@ const WD = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const WDL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const MON = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
-const S = { settings: null, days: {}, inbox: { items: [] }, view: 'day', sel: null, reviewRange: 'week', monthAnchor: null, drag: null, drop: null, selected: null, lastInk: null, email: null };
+const S = { settings: null, days: {}, inbox: { items: [] }, view: 'day', sel: null, reviewRange: 'week', monthAnchor: null, drag: null, drop: null, selected: null, hover: null, lastInk: null, email: null };
 let sb = null, uid = null, mode = 'local', session = null;
 const $ = id => document.getElementById(id);
 
@@ -204,6 +205,25 @@ function arcD(r, a, b, rev) {
 }
 const arcLen = (r, a, b) => r * ang(b - a);
 const snap = m => Math.max(0, Math.min(MIN, Math.round(m / 15) * 15));
+// Round drag handles at both ends of the selected (or, with a mouse, hovered) block.
+function knobsSVG(plan, acts) {
+  const D = S.drag;
+  if (D && D.mode === 'draw') return '';
+  let out = '';
+  for (const [tgt, strong] of [[S.selected, true], [S.hover, false]]) {
+    if (!tgt || (!strong && S.selected && S.selected.id === tgt.id)) continue;
+    const vb = (tgt.ring === 'plan' ? plan : acts).find(b => b.id === tgt.id && !(tgt.ring === 'actual' && b.carried));
+    const ed = editEdges(tgt.ring, vb); if (!ed) continue;
+    const live = D && D.block && D.block.id === vb.id, a = live ? D.a : vb.s, b = live ? D.b : vb.e;
+    const rr = ringR(tgt.ring), kr = tgt.ring === 'plan' ? (strong ? 15 : 12) : (strong ? 12 : 10);
+    for (const [m, on] of [[a, ed.s], [b, ed.e]]) {
+      if (!on) continue;
+      const [x, y] = P(rr, m), [x0, y0] = P(rr - kr * 0.45, m), [x1, y1] = P(rr + kr * 0.45, m);
+      out += `<g opacity="${strong ? 1 : 0.85}"><circle cx="${f2(x)}" cy="${f2(y)}" r="${kr}" fill="var(--ivory)" stroke="var(--face)" stroke-width="3"/><line x1="${f2(x0)}" y1="${f2(y0)}" x2="${f2(x1)}" y2="${f2(y1)}" stroke="var(--face)" stroke-width="2" stroke-linecap="round"/></g>`;
+    }
+  }
+  return out;
+}
 let LABEL_PX = 14;
 function dialSVG(k) {
   LABEL_PX = dialEl.clientWidth && dialEl.clientWidth < 440 ? 21 : 14;
@@ -257,6 +277,7 @@ function dialSVG(k) {
     for (const m of [gh.a, gh.b]) { const [x0, y0] = P(r - w / 2 - 6, m), [x1, y1] = P(r + w / 2 + 6, m); g += `<line x1="${f2(x0)}" y1="${f2(y0)}" x2="${f2(x1)}" y2="${f2(y1)}" stroke="var(--ivory)" stroke-width="2"/>`; }
     g += '</g>';
   }
+  g += knobsSVG(plan, acts);
   if (isToday) {
     const [tx, ty] = P(R_TICK + 4, nm), [bx, by] = P(R_ACT - W_ACT / 2 - 8, nm);
     g += `<g aria-hidden="true"><line x1="${f2(bx)}" y1="${f2(by)}" x2="${f2(tx)}" y2="${f2(ty)}" stroke="var(--ivory)" stroke-width="2" stroke-linecap="round"/><circle cx="${f2(bx)}" cy="${f2(by)}" r="4" fill="var(--ivory)"/><circle cx="${f2(tx)}" cy="${f2(ty)}" r="2.6" fill="var(--ivory)"/></g>`;
@@ -270,10 +291,12 @@ function ghostRange() {
   return null;
 }
 function renderDial() {
+  if (S.selected && !S.drag && !sheetOpen() && !findVis(S.selected.ring, S.selected.id)) S.selected = null;
+  if (S.hover && !findVis(S.hover.ring, S.hover.id)) S.hover = null;
   dialEl.innerHTML = dialSVG(S.sel);
   const plan = vis(S.sel, 'plan').filter(b => !b.closed), planned = plan.reduce((s, b) => s + b.e - b.s, 0);
   dialEl.setAttribute('aria-label', `24-hour dial for ${longDate(S.sel)}: ${plan.length} planned blocks, ${fmtD(planned)} planned, ${fmtD(MIN - planned)} free.`);
-  renderCenter();
+  renderCenter(); renderSelBar();
 }
 function renderCenter() {
   const el = $('dial-center'), k = S.sel, n = now(), t = n.key;
@@ -470,74 +493,270 @@ function render() {
   renderWeek(); renderDial(); renderNow(); renderAgenda(); renderInbox(); renderReview('review-card', 'review-h');
 }
 
-/* ---------- pointer on the dial: draw, move, resize, tap ---------- */
-function svgPoint(ev) { const p = dialEl.createSVGPoint(); p.x = ev.clientX; p.y = ev.clientY; const q = p.matrixTransform(dialEl.getScreenCTM().inverse()); const dx = q.x - CX, dy = q.y - CX; let a = Math.atan2(dx, -dy); if (a < 0) a += Math.PI * 2; return { r: Math.hypot(dx, dy), m: a / (Math.PI * 2) * MIN }; }
-function buzz() { try { navigator.vibrate && navigator.vibrate(4); } catch (_) {} }
+/* ---------- the dial: select, drag handles, move, draw ----------
+   Mouse: drag on empty ring draws; drag a block moves it; drag its round handles resizes; click selects.
+   Touch: tap a block to select it (handles + a control bar appear); drag the handles or the selected block;
+   press and hold the ring to draw, or hold a block to pick it up. Everything else scrolls the page. */
+function svgPoint(ev) { const p = dialEl.createSVGPoint(); p.x = ev.clientX; p.y = ev.clientY; const q = p.matrixTransform(dialEl.getScreenCTM().inverse()); const dx = q.x - CX, dy = q.y - CX; let a = Math.atan2(dx, -dy); if (a < 0) a += Math.PI * 2; return { x: q.x, y: q.y, r: Math.hypot(dx, dy), m: a / (Math.PI * 2) * MIN }; }
+function buzz() { try { navigator.vibrate && navigator.vibrate(6); } catch (_) {} }
 function neighbours(k, ring, block) {
   const list = occ(k, ring, block.id);
   const lo = list.filter(x => x.e <= block.s).reduce((s, x) => Math.max(s, x.e), 0);
   const hi = list.filter(x => x.s >= block.e).reduce((s, x) => Math.min(s, x.s), MIN);
   return [Math.max(0, lo), Math.min(MIN, hi)];
 }
-dialEl.addEventListener('pointerdown', ev => {
-  if (!S.settings || ev.button > 0) return;
-  const { r, m } = svgPoint(ev); let ring = null;
-  if (r >= 196 && r <= 266) ring = 'plan'; else if (r >= 158 && r < 196) ring = 'actual'; else return;
-  const k = S.sel, n = now();
-  if (ring === 'actual' && k > n.key) { toast('The inner ring fills in as the day happens'); return; }
-  const limit = ring === 'actual' ? (k === n.key ? n.min : MIN) : MIN;
-  const list = ring === 'plan' ? vis(k, 'plan') : eff(k), hit = list.find(b => b.s <= m && m < b.e);
-  if (hit) {
-    const editable = !hit.spill && !hit.closed && !hit.running && !(ring === 'actual' && hit.carried) && !hit.cutEnd;
-    const edgeTol = Math.max(8, (hit.e - hit.s) * 0.12);
-    let mode = 'tap', edge = null;
-    if (editable && hit.e - hit.s >= 30) { if (m - hit.s < edgeTol) { mode = 'resize'; edge = 's'; } else if (hit.e - m < edgeTol) { mode = 'resize'; edge = 'e'; } }
-    S.drag = { mode, ring, block: hit, edge, a: hit.s, b: hit.e, x: ev.clientX, y: ev.clientY, last: m, acc: 0, canMove: editable, limit, bounds: editable ? neighbours(k, ring, hit) : null };
-  } else {
-    const busy = occ(k, ring); const gap = C.freeGap(busy, m); if (!gap) return;
-    const lo = Math.max(0, gap[0]), hi = Math.min(MIN, gap[1], limit); if (hi - lo < 15) { if (ring === 'actual' && m > limit) toast('You can only log time that has passed'); return; }
-    const anchor = Math.min(Math.max(snap(m), lo), hi);
-    S.drag = { mode: 'draw', ring, anchor, lo, hi, a: anchor, b: anchor, last: m, acc: 0, x: ev.clientX, y: ev.clientY };
+const ringR = ring => ring === 'plan' ? R_PLAN : R_ACT;
+function findVis(ring, id) { return (ring === 'plan' ? vis(S.sel, 'plan') : eff(S.sel)).find(b => b.id === id && !(ring === 'actual' && b.carried)) || null; }
+// Which edges of a visible block can be changed on the dial (a block crossing midnight keeps its far edge).
+function editEdges(ring, b) {
+  if (!b || b.closed || b.running || (ring === 'actual' && b.carried)) return null;
+  return { s: !b.spill, e: !b.cutEnd, move: !b.spill && !b.cutEnd };
+}
+const actualLimit = () => S.sel === todayKey() ? Math.floor(now().min) : S.sel < todayKey() ? MIN : 0;
+function hitTest(pt, touch) {
+  const tol = touch ? 46 : 24;
+  for (const tgt of [S.selected, touch ? null : S.hover]) {
+    if (!tgt) continue;
+    const vb = findVis(tgt.ring, tgt.id), ed = editEdges(tgt.ring, vb); if (!ed) continue;
+    const rr = ringR(tgt.ring), d = (m) => { const [x, y] = P(rr, m); return Math.hypot(pt.x - x, pt.y - y); };
+    const ds = ed.s ? d(vb.s) : Infinity, de = ed.e ? d(vb.e) : Infinity;
+    // Inside the block, only its outer 30% counts as a handle, so the middle stays grabbable for moving.
+    const inside = Math.abs(pt.r - rr) <= (tgt.ring === 'plan' ? W_PLAN : W_ACT) / 2 + 6 && pt.m > vb.s && pt.m < vb.e;
+    const zone = inside ? Math.max(10, Math.min(tol, arcLen(rr, vb.s, vb.e) * 0.3)) : tol;
+    if (Math.min(ds, de) <= zone) return { type: 'resize', ring: tgt.ring, block: vb, edge: ds <= de ? 's' : 'e' };
   }
-  dialEl.setPointerCapture(ev.pointerId); ev.preventDefault();
-});
-dialEl.addEventListener('pointermove', ev => {
+  let ring = null;
+  if (pt.r >= 196 && pt.r <= 270) ring = 'plan'; else if (pt.r >= 154 && pt.r < 196) ring = 'actual'; else return { type: 'none' };
+  const list = ring === 'plan' ? vis(S.sel, 'plan') : eff(S.sel), hit = list.find(b => b.s <= pt.m && pt.m < b.e);
+  if (!hit) return { type: 'empty', ring };
+  const sel = S.selected && S.selected.ring === ring && S.selected.id === hit.id && !(ring === 'actual' && hit.carried);
+  return { type: sel ? 'selected' : 'block', ring, block: hit };
+}
+function select(ring, b) {
+  const was = S.selected && S.selected.id;
+  S.selected = { ring, id: b.id }; S.hover = null; renderDial();
+  if (was !== b.id && mqPhone.matches) setTimeout(() => { const el = $('selbar'); if (!el || el.hidden) return; const r = el.getBoundingClientRect(); if (r.bottom > innerHeight - 8) window.scrollBy({ top: r.bottom - innerHeight + 16, behavior: 'smooth' }); }, 30);
+}
+function deselect() { if (!S.selected) return; S.selected = null; renderDial(); }
+function tapBlock(h) {
+  const ed = editEdges(h.ring, h.block);
+  if (!ed || h.type === 'selected') { openEditor(h.ring, h.block); return; }
+  select(h.ring, h.block);
+}
+function beginDrag(mode, h, pt, extra = {}) {
+  const k = S.sel, n = now(), ring = h.ring, limit = ring === 'actual' ? (k === n.key ? n.min : k < n.key ? MIN : 0) : MIN;
+  if (mode === 'draw') {
+    if (ring === 'actual' && k > n.key) { toast('The inner ring fills in as the day happens'); return false; }
+    const gap = C.freeGap(occ(k, ring), pt.m); if (!gap) return false;
+    const lo = Math.max(0, gap[0]), hi = Math.min(MIN, gap[1], limit);
+    if (hi - lo < 15) { if (ring === 'actual' && pt.m > limit) toast('You can only log time that has passed'); return false; }
+    const anchor = Math.min(Math.max(snap(pt.m), lo), hi);
+    S.drag = { mode, ring, anchor, lo, hi, a: anchor, b: anchor, last: pt.m, acc: 0, ...extra };
+    if (extra.minLen) { S.drag.a = Math.min(anchor, hi - 15); S.drag.b = S.drag.a + 15; }
+  } else {
+    S.drag = { mode, ring, block: h.block, edge: h.edge, a: h.block.s, b: h.block.e, last: pt.m, acc: 0, limit, bounds: neighbours(k, ring, h.block), ...extra };
+  }
+  return true;
+}
+function moveDrag(pt) {
   const D = S.drag; if (!D) return;
-  const { m } = svgPoint(ev); let dm = m - D.last; if (dm > 720) dm -= MIN; if (dm < -720) dm += MIN; D.acc += dm; D.last = m;
-  if (D.mode === 'tap') { if (Math.hypot(ev.clientX - D.x, ev.clientY - D.y) > 8 && D.canMove) { D.mode = 'move'; } else return; }
+  let dm = pt.m - D.last; if (dm > 720) dm -= MIN; if (dm < -720) dm += MIN; D.acc += dm; D.last = pt.m;
   let a = D.a, b = D.b;
   if (D.mode === 'draw') {
     const cur = D.anchor + D.acc; a = Math.max(D.lo, snap(Math.min(D.anchor, cur))); b = Math.min(D.hi, snap(Math.max(D.anchor, cur)));
+    if (D.minLen && b - a < 15) { if (a + 15 <= D.hi) b = a + 15; else a = b - 15; }
   } else if (D.mode === 'move') {
-    const dur = D.block.e - D.block.s, [lo, hi] = D.bounds;
+    const dur = D.block.e - D.block.s, [lo, hi0] = D.bounds, hi = Math.min(hi0, D.limit);
     a = Math.min(Math.max(lo, D.block.s + Math.round(D.acc / 15) * 15), hi - dur); b = a + dur;
+    if (a < lo) return;
   } else if (D.mode === 'resize') {
     const [lo, hi] = D.bounds;
     if (D.edge === 's') a = Math.min(D.block.e - 15, Math.max(lo, snap(D.block.s + D.acc)));
     else b = Math.max(D.block.s + 15, Math.min(hi, D.limit, snap(D.block.e + D.acc)));
-  }
-  if (a !== D.a || b !== D.b) { if (b - a !== D.b - D.a || D.mode === 'move') buzz(); D.a = a; D.b = b; renderDial(); }
-});
-function endDrag(ev, cancel) {
+  } else return;
+  if (a !== D.a || b !== D.b) { buzz(); D.a = a; D.b = b; renderDial(); }
+}
+// Write new visible start/end back to the stored block (handles New York time and blocks crossing midnight).
+function commitTimes(ring, vb, a, b, checkpointIt, msg) {
+  const src = vb.srcKey || S.sel, shift = vb.spill ? MIN : 0;
+  const apply = () => {
+    const raw = ensureDay(src)[ring].find(x => x.id === vb.id); if (!raw) return;
+    const ns = vb.spill ? null : a + shift, ne = vb.cutEnd ? null : b + shift;
+    if (raw.ny) { if (ns != null) raw.s = C.localToNy(src, ns, TZ); if (ne != null) raw.e = C.localToNy(src, ne, TZ); }
+    else { if (ns != null) raw.s = ns; if (ne != null && raw.e != null) raw.e = ne; }
+  };
+  if (checkpointIt) change(['d-' + src], apply, msg); else { apply(); saveDay(src); render(); }
+}
+function finishDrag(cancel) {
   const D = S.drag; if (!D) return; S.drag = null;
-  try { dialEl.releasePointerCapture(ev.pointerId); } catch (_) {}
-  if (cancel) { renderDial(); return; }
-  if (D.mode === 'tap') { openEditor(D.ring, D.block); return; }
+  if (cancel || D.mode === 'press') { renderDial(); return; }
   if (D.mode === 'move' || D.mode === 'resize') {
+    S.selected = { ring: D.ring, id: D.block.id };
     if (D.a === D.block.s && D.b === D.block.e) { renderDial(); return; }
-    const src = D.block.srcKey;
-    change(['d-' + src], () => {
-      const raw = ensureDay(src)[D.ring].find(x => x.id === D.block.id); if (!raw) return;
-      if (raw.ny) { raw.s = C.localToNy(src, D.a, TZ); raw.e = C.localToNy(src, D.b, TZ); }
-      else { raw.s = D.a; if (raw.e != null) raw.e = D.b; }
-    }, (D.mode === 'move' ? 'Moved ' : 'Changed ') + nameOf(D.block) + ' to ' + fmtR(D.a, D.b));
+    commitTimes(D.ring, D.block, D.a, D.b, true, (D.mode === 'move' ? 'Moved ' : 'Changed ') + nameOf(D.block) + ' to ' + fmtR(D.a, D.b));
     return;
   }
-  if (D.b - D.a < 15) { renderDial(); if (D.b === D.a) toast('Drag along the ring to draw a block'); return; }
-  openNewBlock(D.ring, D.a, D.b);
+  if (D.b - D.a < 15) { renderDial(); if (!D.minLen) toast('Drag along the ring to draw a block'); return; }
+  S.selected = null; openNewBlock(D.ring, D.a, D.b);
 }
-dialEl.addEventListener('pointerup', ev => endDrag(ev));
-dialEl.addEventListener('pointercancel', ev => endDrag(ev, true));
+
+/* mouse and pen */
+dialEl.addEventListener('pointerdown', ev => {
+  if (ev.pointerType === 'touch' || !S.settings || ev.button > 0) return;
+  const pt = svgPoint(ev), h = hitTest(pt, false);
+  if (h.type === 'none') { deselect(); return; }
+  let ok = false;
+  if (h.type === 'resize') ok = beginDrag('resize', h, pt);
+  else if (h.type === 'block' || h.type === 'selected') ok = beginDrag('press', h, pt, { hit: h, x: ev.clientX, y: ev.clientY });
+  else ok = beginDrag('draw', h, pt);
+  if (!ok) return;
+  dialEl.setPointerCapture(ev.pointerId); ev.preventDefault();
+});
+dialEl.addEventListener('pointermove', ev => {
+  if (ev.pointerType === 'touch') return;
+  const pt = svgPoint(ev), D = S.drag;
+  if (!D) {
+    const h = hitTest(pt, false), ed = h.block && editEdges(h.ring, h.block);
+    dialEl.style.cursor = h.type === 'resize' ? 'ew-resize' : (h.type === 'block' || h.type === 'selected') ? (ed && ed.move ? 'grab' : 'pointer') : h.type === 'empty' ? 'crosshair' : '';
+    const hv = (h.type === 'block' || h.type === 'selected' || h.type === 'resize') && ed ? { ring: h.ring, id: h.block.id } : (h.type === 'resize' ? S.hover : null);
+    if ((hv && hv.id) !== (S.hover && S.hover.id)) { S.hover = hv; renderDial(); }
+    return;
+  }
+  if (D.mode === 'press') {
+    if (Math.hypot(ev.clientX - D.x, ev.clientY - D.y) < 6) { D.last = pt.m; return; }
+    const ed = editEdges(D.ring, D.block); if (!ed || !ed.move) return;
+    D.mode = 'move'; S.selected = { ring: D.ring, id: D.block.id }; dialEl.style.cursor = 'grabbing';
+  }
+  moveDrag(pt);
+});
+dialEl.addEventListener('pointerup', ev => {
+  if (ev.pointerType === 'touch') return;
+  const D = S.drag; try { dialEl.releasePointerCapture(ev.pointerId); } catch (_) {}
+  if (D && D.mode === 'press') { S.drag = null; tapBlock(D.hit); return; }
+  finishDrag(false);
+});
+dialEl.addEventListener('pointercancel', ev => { if (ev.pointerType !== 'touch') finishDrag(true); });
+dialEl.addEventListener('pointerleave', ev => { if (ev.pointerType !== 'touch' && !S.drag && S.hover) { S.hover = null; renderDial(); } });
+
+/* touch: page scrolls unless the gesture is on the selected block, its handles, or a press-and-hold */
+let T = null;
+const touchById = (list, id) => { for (const t of list) if (t.identifier === id) return t; return null; };
+dialEl.addEventListener('touchstart', ev => {
+  if (!S.settings) return;
+  if (ev.touches.length > 1) { if (T) { clearTimeout(T.timer); if (T.active) finishDrag(true); T = null; } return; }
+  const t = ev.changedTouches[0], pt = svgPoint(t), h = hitTest(pt, true);
+  T = { id: t.identifier, x0: t.clientX, y0: t.clientY, t0: Date.now(), h, pt, active: false, moved: false };
+  if (h.type === 'resize' || (h.type === 'selected' && editEdges(h.ring, h.block)?.move)) {
+    ev.preventDefault();
+    if (beginDrag(h.type === 'resize' ? 'resize' : 'move', h, pt)) { T.active = true; T.dragged = false; renderDial(); }
+    return;
+  }
+  if (h.type === 'block' || h.type === 'empty') {
+    T.timer = setTimeout(() => {
+      if (!T || T.moved) return;
+      if (h.type === 'empty') { if (beginDrag('draw', h, pt, { minLen: true })) { T.active = true; S.selected = null; buzz(); renderDial(); } }
+      else { const ed = editEdges(h.ring, h.block); if (!ed) return; select(h.ring, h.block); if (ed.move && beginDrag('move', h, pt)) { T.active = true; buzz(); renderDial(); } }
+    }, 320);
+  }
+}, { passive: false });
+dialEl.addEventListener('touchmove', ev => {
+  if (!T) return; const t = touchById(ev.changedTouches, T.id); if (!t) return;
+  if (T.active) { ev.preventDefault(); T.dragged = true; moveDrag(svgPoint(t)); return; }
+  if (Math.hypot(t.clientX - T.x0, t.clientY - T.y0) > 10) { T.moved = true; clearTimeout(T.timer); }
+}, { passive: false });
+dialEl.addEventListener('touchend', ev => {
+  if (!T) return; const t = touchById(ev.changedTouches, T.id); if (!t) return;
+  const g = T; T = null; clearTimeout(g.timer);
+  if (g.active) {
+    ev.preventDefault();
+    // a tap on the selected block (no drag) opens its details
+    if (!g.dragged && g.h.type === 'selected' && Date.now() - g.t0 < 320) { S.drag = null; openEditor(g.h.ring, g.h.block); return; }
+    finishDrag(false); return;
+  }
+  if (g.moved || Date.now() - g.t0 > 600) return;
+  ev.preventDefault();
+  if (g.h.type === 'block' || g.h.type === 'selected') tapBlock(g.h); else deselect();
+}, { passive: false });
+dialEl.addEventListener('touchcancel', () => { if (!T) return; clearTimeout(T.timer); if (T.active) finishDrag(true); T = null; });
+
+/* the control bar under the dial for the selected block */
+function selState() {
+  const tgt = S.selected; if (!tgt) return null;
+  const vb = findVis(tgt.ring, tgt.id), ed = editEdges(tgt.ring, vb); if (!ed) return null;
+  return { ring: tgt.ring, vb, ed };
+}
+function renderSelBar() {
+  const el = $('selbar'); if (!el) return;
+  const st = selState();
+  if (!st || sheetOpen()) { el.hidden = true; el.innerHTML = ''; el.dataset.key = ''; return; }
+  const { vb, ed, ring } = st, D = S.drag && S.drag.block && S.drag.block.id === vb.id ? S.drag : null;
+  const a = D ? D.a : vb.s, b = D ? D.b : vb.e;
+  const sTxt = vb.spill ? fmtT(vb.fullS) + ' (yesterday)' : fmtT(a), eTxt = vb.cutEnd ? fmtT(vb.fullE) + ' (next day)' : fmtT(b);
+  const dur = (vb.cutEnd ? vb.fullE : vb.spill ? b + MIN : b) - (vb.spill ? vb.fullS : a);
+  const durTxt = fmtD(dur) + (ring === 'actual' ? ' · what happened' : '');
+  const key = [ring, vb.id, ed.s, ed.e, ed.move].join('|');
+  el.hidden = false;
+  // Same block as before: update the words only, so a finger holding + or − keeps its button.
+  if (el.dataset.key === key) {
+    el.querySelector('[data-t="name"]').textContent = nameOf(vb);
+    el.querySelector('[data-t="dur"]').textContent = durTxt;
+    el.querySelector('[data-t="s"]').textContent = sTxt;
+    el.querySelector('[data-t="e"]').textContent = eTxt;
+    el.querySelector('[data-t="dot"]').style.background = cat(vb.c).color;
+    el.querySelector('[data-sb="undo"]').disabled = !undoStack.length;
+    return;
+  }
+  el.dataset.key = key;
+  const step = (kind, label, txt, can) => `<div class="sb-ctl"><span class="label">${label}</span>${can ? `<div class="stepper"><button type="button" data-nudge="${kind}" data-d="-15" aria-label="${label} 15 minutes earlier">−</button><span class="num" data-t="${kind}">${txt}</span><button type="button" data-nudge="${kind}" data-d="15" aria-label="${label} 15 minutes later">+</button></div>` : `<div class="stepper fixed"><span class="num" data-t="${kind}">${txt}</span></div>`}</div>`;
+  const touchy = matchMedia('(pointer: coarse)').matches;
+  el.innerHTML = `<div class="sb-head"><span class="dot" data-t="dot" style="background:${cat(vb.c).color}"></span><div class="sb-title"><b data-t="name">${esc(nameOf(vb))}</b><span class="num" data-t="dur">${durTxt}</span></div>
+      <button type="button" class="btn-text" data-sb="undo"${undoStack.length ? '' : ' disabled'}>Undo</button><button type="button" class="btn-ghost" data-sb="edit">Details</button><button type="button" class="icon-btn" data-sb="close" aria-label="Done editing"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 5l10 10M15 5 5 15"/></svg></button></div>
+    <div class="sb-ctls">${step('s', 'Start', sTxt, ed.s)}${step('e', 'End', eTxt, ed.e)}${ed.move ? `<div class="sb-ctl"><span class="label">Move</span><div class="stepper"><button type="button" data-nudge="m" data-d="-15" aria-label="Move 15 minutes earlier">‹</button><span>15 min</span><button type="button" data-nudge="m" data-d="15" aria-label="Move 15 minutes later">›</button></div></div>` : ''}</div>
+    <p class="note">${!ed.move ? 'This block crosses midnight. Change its ' + (ed.s ? 'start' : 'end') + ' here, and its ' + (ed.s ? 'end on the next day' : 'start on the day before') + '.' : touchy ? 'Drag the round handles to change the time, or drag the block to move it. Hold + or − to keep going.' : 'Drag the round handles or the block. Arrow keys move it by 15 minutes; Shift + arrows change the end.'}</p>`;
+}
+// One 15-minute step from the control bar or the keyboard. Returns false when blocked.
+function nudge(kind, delta, first) {
+  const st = selState(); if (!st) return false;
+  const { vb, ed, ring } = st, k = S.sel;
+  if (!(kind === 'm' ? ed.move : ed[kind])) { if (first) toast(kind === 'm' ? 'A block that crosses midnight can\u2019t be moved here. Change its start or end instead.' : 'Change this end on the ' + (vb.spill ? 'day before' : 'next day') + '.'); return false; }
+  const [lo, hi0] = neighbours(k, ring, vb), hi = ring === 'actual' ? Math.min(hi0, actualLimit()) : hi0;
+  let a = vb.s, b = vb.e;
+  if (kind === 's' && ed.s) a = Math.min(b - 15, Math.max(lo, a + delta));
+  if (kind === 'e' && ed.e) b = Math.max(a + 15, Math.min(hi, b + delta));
+  if (kind === 'm' && ed.move) { const dur = b - a; a = Math.min(Math.max(lo, a + delta), hi - dur); b = a + dur; if (a < lo) return false; }
+  if (a === vb.s && b === vb.e) {
+    if (first) {
+      const shrinking = (kind === 's' && delta > 0) || (kind === 'e' && delta < 0);
+      const later = delta > 0, list = occ(k, ring, vb.id);
+      const nb = later ? list.filter(x => x.s >= vb.e).sort((p, q) => p.s - q.s)[0] : list.filter(x => x.e <= vb.s).sort((p, q) => q.e - p.e)[0];
+      toast(shrinking ? 'A block is at least 15 minutes' : ring === 'actual' && later && hi === actualLimit() && actualLimit() < MIN ? 'You can only log time that has passed' : nb && (later ? nb.s === hi : nb.e === lo) ? 'It touches ' + (nb.t || cat(nb.c).name) : later ? 'The day ends at midnight' : 'The day starts at midnight');
+    }
+    return false;
+  }
+  commitTimes(ring, vb, a, b, first, null);
+  return true;
+}
+let repT = null;
+const stopRepeat = () => { clearTimeout(repT); repT = null; };
+document.addEventListener('pointerdown', ev => {
+  const btn = ev.target.closest('[data-nudge]'); if (!btn) return;
+  ev.preventDefault(); stopRepeat();
+  const kind = btn.dataset.nudge, d = +btn.dataset.d;
+  if (!nudge(kind, d, true)) return;
+  let n = 0;
+  btn.addEventListener('pointerup', stopRepeat, { once: true });
+  btn.addEventListener('pointercancel', stopRepeat, { once: true });
+  btn.addEventListener('pointerleave', stopRepeat, { once: true });
+  repT = setTimeout(function tick() { if (!btn.isConnected || !nudge(kind, d, false)) { stopRepeat(); return; } repT = setTimeout(tick, n++ < 4 ? 170 : 90); }, 450);
+});
+['pointerup', 'pointercancel', 'blur'].forEach(t => (t === 'blur' ? window : document).addEventListener(t, stopRepeat));
+$('selbar').addEventListener('click', ev => {
+  const nb = ev.target.closest('[data-nudge]'); if (nb) { if (ev.detail === 0) nudge(nb.dataset.nudge, +nb.dataset.d, true); return; }
+  const x = ev.target.closest('[data-sb]')?.dataset.sb; if (!x) return;
+  if (x === 'close') deselect();
+  if (x === 'undo') undo();
+  if (x === 'edit') { const st = selState(); if (st) openEditor(st.ring, st.vb); }
+});
 
 /* ---------- inbox drag onto the dial ---------- */
 let idrag = null;
@@ -593,7 +812,13 @@ function openSheet(html, onMount) {
 }
 function closeSheet() { sheetRoot.innerHTML = ''; S.selected = null; render(); if (lastFocus && lastFocus.isConnected) lastFocus.focus({ preventScroll: true }); }
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && sheetOpen()) closeSheet();
+  if (e.key === 'Escape' && sheetOpen()) { closeSheet(); return; }
+  const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
+  if (S.selected && !sheetOpen() && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); nudge(e.shiftKey ? 'e' : 'm', e.key === 'ArrowLeft' ? -15 : 15, true); return; }
+    if (e.key === 'Escape') { deselect(); return; }
+    if (e.key === 'Enter' && document.activeElement === document.body) { const st = selState(); if (st) { e.preventDefault(); openEditor(st.ring, st.vb); } return; }
+  }
   if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { e.preventDefault(); undo(); }
 });
 sheetRoot.addEventListener('click', e => { if (e.target.dataset.close) closeSheet(); });
@@ -1072,10 +1297,10 @@ $('nav-month').onclick = () => { S.view = 'month'; S.monthAnchor = S.sel; S.revi
 $('nav-month-sm').onclick = () => { S.view = S.view === 'month' ? 'day' : 'month'; S.monthAnchor = S.sel; S.reviewRange = S.view === 'month' ? 'month' : 'week'; render(); };
 $('shutdown-btn').onclick = () => S.settings && openShutdown(0);
 $('open-settings').onclick = () => S.settings && openSettings();
-$('prev-day').onclick = () => { S.sel = addDays(S.sel, -1); render(); };
-$('next-day').onclick = () => { S.sel = addDays(S.sel, 1); render(); };
+$('prev-day').onclick = () => { S.sel = addDays(S.sel, -1); S.selected = null; render(); };
+$('next-day').onclick = () => { S.sel = addDays(S.sel, 1); S.selected = null; render(); };
 $('go-today').onclick = () => { S.sel = todayKey(); render(); };
-const mq = window.matchMedia('(max-width: 680px)');
+const mq = mqPhone;
 const syncSm = () => { $('nav-month-sm').hidden = !mq.matches; }; syncSm(); mq.addEventListener && mq.addEventListener('change', syncSm);
 window.addEventListener('scroll', () => $('top').classList.toggle('scrolled', window.scrollY > 4), { passive: true });
 
